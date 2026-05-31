@@ -51,121 +51,6 @@ def load_train_data() -> pd.DataFrame:
 # Overall plots (Q1) — output/plots/overall/
 # ===========================================================================
 
-def plot_cases_by_score(df: pd.DataFrame, composite: pd.Series, plot_dir: str,
-                        outcome_col: str = "disease_cases", outcome_label: str = "Disease Cases",
-                        model=None):
-    """Box plot of outcome at each composite suitability score level."""
-    if model is None:
-        raise ValueError("model must be provided")
-    fig, ax = plt.subplots(figsize=(6, 5))
-
-    levels = sorted(composite.unique())
-    data = [df.loc[composite == level, outcome_col] for level in levels]
-
-    bp = ax.boxplot(data, tick_labels=[str(int(l)) for l in levels], patch_artist=True,
-                    widths=0.5, medianprops=dict(color="black", linewidth=1.5))
-
-    n_components = len(model.components)
-    box_cmap = plt.cm.RdYlGn
-    colors = [box_cmap(i / n_components) for i in range(len(levels))]
-    for patch, color in zip(bp["boxes"], colors):
-        patch.set_facecolor(color)
-        patch.set_alpha(0.7)
-
-    for i, level in enumerate(levels):
-        y = df.loc[composite == level, outcome_col]
-        x = np.random.normal(i + 1, 0.04, size=len(y))
-        ax.scatter(x, y, alpha=0.5, color="black", s=20, zorder=3)
-
-    ax.set_xlabel("Composite Suitability Score")
-    ax.set_ylabel(outcome_label)
-    ax.set_title(f"{outcome_label} by Suitability Score Level")
-
-    fig.tight_layout()
-    fig.savefig(os.path.join(plot_dir, "cases_by_score.png"), dpi=150)
-    plt.close(fig)
-    print("  overall/cases_by_score.png")
-    return fig
-
-
-def plot_component_comparison(df: pd.DataFrame, component_scores: pd.DataFrame, plot_dir: str,
-                              outcome_col: str = "disease_cases", outcome_label: str = "Disease Cases"):
-    """Grouped bar chart: mean outcome when each threshold is met vs. not met."""
-    components = list(component_scores.columns)
-    met_means = []
-    not_met_means = []
-    met_sems = []
-    not_met_sems = []
-
-    for comp in components:
-        binary = component_scores[comp]
-        met = df.loc[binary == 1, outcome_col]
-        not_met = df.loc[binary == 0, outcome_col]
-        met_means.append(met.mean())
-        not_met_means.append(not_met.mean())
-        met_sems.append(met.sem())
-        not_met_sems.append(not_met.sem())
-
-    x = np.arange(len(components))
-    width = 0.35
-
-    fig, ax = plt.subplots(figsize=(6, 5))
-    ax.bar(x - width / 2, not_met_means, width, yerr=not_met_sems,
-           label="Threshold NOT met", color="#d9534f", alpha=0.8, capsize=4)
-    ax.bar(x + width / 2, met_means, width, yerr=met_sems,
-           label="Threshold met", color="#5cb85c", alpha=0.8, capsize=4)
-
-    ax.set_ylabel(f"Mean {outcome_label}")
-    ax.set_title(f"Mean {outcome_label}: Threshold Met vs. Not Met")
-    ax.set_xticks(x)
-    ax.set_xticklabels([c.capitalize() for c in components])
-    ax.legend()
-
-    fig.tight_layout()
-    fig.savefig(os.path.join(plot_dir, "component_comparison.png"), dpi=150)
-    plt.close(fig)
-    print("  overall/component_comparison.png")
-    return fig
-
-
-def plot_climate_vs_cases(df: pd.DataFrame, plot_dir: str,
-                          outcome_col: str = "disease_cases", outcome_label: str = "Disease Cases",
-                          model=None):
-    """Scatter plots of each climate variable vs. outcome, with threshold zones."""
-    if model is None:
-        raise ValueError("model must be provided")
-
-    fig, axes = plt.subplots(1, len(model.components), figsize=(5 * len(model.components), 5))
-    if len(model.components) == 1:
-        axes = [axes]
-
-    for ax, comp in zip(axes, model.components):
-        x = df[comp.column]
-        y = df[outcome_col]
-        ax.scatter(x, y, alpha=0.6, edgecolors="black", linewidth=0.5, s=40)
-
-        xlim = ax.get_xlim()
-        lo = comp.min_value if comp.min_value is not None else xlim[0]
-        hi = comp.max_value if comp.max_value is not None else xlim[1]
-        ax.axvspan(lo, hi, alpha=0.12, color="green", label="Suitable range")
-
-        if comp.min_value is not None:
-            ax.axvline(comp.min_value, color="green", linestyle="--", linewidth=1, alpha=0.7)
-        if comp.max_value is not None:
-            ax.axvline(comp.max_value, color="green", linestyle="--", linewidth=1, alpha=0.7)
-
-        ax.set_xlabel(comp.column.replace("_", " ").title())
-        ax.set_ylabel(outcome_label)
-        ax.set_title(f"{comp.name.capitalize()} vs. {outcome_label}")
-        ax.legend(fontsize=9)
-
-    fig.tight_layout()
-    fig.savefig(os.path.join(plot_dir, "climate_vs_cases.png"), dpi=150)
-    plt.close(fig)
-    print("  overall/climate_vs_cases.png")
-    return fig
-
-
 def plot_time_series(df: pd.DataFrame, composite: pd.Series, plot_dir: str,
                      outcome_col: str = "disease_cases", outcome_label: str = "Disease Cases",
                      model=None):
@@ -251,37 +136,6 @@ def plot_location_correlations(results: dict, plot_dir: str):
     return fig
 
 
-def plot_correlation_comparison(results: dict, plot_dir: str, outcome_label: str = "incidence"):
-    """Compare Spearman r: composite score vs. raw continuous variables."""
-    overall = results.get("overall_correlation", {})
-    continuous = results.get("continuous_variables", {})
-
-    names = ["Composite\nscore"]
-    rs = [overall.get("spearman_r", 0)]
-
-    for col, stats in continuous.items():
-        label = col.replace("_", "\n")
-        names.append(label)
-        rs.append(stats.get("spearman_r", 0))
-
-    fig, ax = plt.subplots(figsize=(5, 4))
-    colors = ["#337ab7"] + ["#5bc0de"] * len(continuous)
-    ax.barh(names, rs, color=colors, alpha=0.8, height=0.5)
-
-    ax.set_xlabel(f"Spearman r (vs. {outcome_label})")
-    ax.set_title("Thresholded Score vs. Raw Variables")
-    ax.set_xlim(0, 1)
-
-    for i, r in enumerate(rs):
-        ax.text(r + 0.02, i, f"{r:.3f}", va="center", fontsize=9)
-
-    fig.tight_layout()
-    fig.savefig(os.path.join(plot_dir, "correlation_comparison.png"), dpi=150)
-    plt.close(fig)
-    print("  overall/correlation_comparison.png")
-    return fig
-
-
 def plot_threshold_frequency(component_scores: pd.DataFrame, plot_dir: str, model=None):
     """Bar chart: percentage of province-months each threshold is met."""
     if model is None:
@@ -363,7 +217,7 @@ def plot_score_heatmap(df: pd.DataFrame, composite: pd.Series, plot_dir: str, mo
 # Temporal plots (Q2) — output/plots/temporal/
 # ===========================================================================
 
-def plot_within_location_temporal(temporal_results: dict, annual_results: dict, plot_dir: str,
+def plot_within_location_temporal(temporal_results: dict, plot_dir: str,
                                    outcome_label: str = "Disease Cases"):
     """Q2: Ranked dot plot of within-province Spearman r values.
 
@@ -497,7 +351,7 @@ def plot_score_vs_cases_by_location(annual_results: dict, plot_dir: str,
                 ax.annotate(loc, xy=(x, y), xytext=(8, 4),
                             textcoords="offset points", fontsize=8)
 
-    if len(xs) >= 3:
+    if len(xs) >= 3 and len(set(xs)) > 1:
         slope, intercept, _, _, _ = sp_stats.linregress(xs, ys)
         x_line = np.linspace(min(xs), max(xs), 50)
         ax.plot(x_line, slope * x_line + intercept, "--", color="gray", linewidth=1.5)
@@ -605,90 +459,6 @@ def plot_continuous_vs_composite_lag(results: dict, plot_dir: str):
 # Component plots (Q5) — output/plots/components/
 # ===========================================================================
 
-def plot_binned_cases(binned_results: dict, plot_dir: str, outcome_label: str = "Disease Cases"):
-    """Bar chart of mean outcome per climate variable bin."""
-    n_comps = len(binned_results)
-    if n_comps == 0:
-        return
-
-    fig, axes = plt.subplots(1, n_comps, figsize=(5 * n_comps, 5))
-    if n_comps == 1:
-        axes = [axes]
-
-    for ax, (comp_name, comp_data) in zip(axes, binned_results.items()):
-        bins = comp_data.get("bins", [])
-        if not bins:
-            continue
-
-        mids = [b["bin_mid"] for b in bins]
-        means = [b["mean_cases"] if b["mean_cases"] is not None else 0 for b in bins]
-        ns = [b["n"] for b in bins]
-
-        ax.bar(range(len(bins)), means, color="#337ab7", alpha=0.8)
-
-        # Threshold lines
-        thresh_min = comp_data.get("threshold_min")
-        thresh_max = comp_data.get("threshold_max")
-
-        for thresh, label in [(thresh_min, "min"), (thresh_max, "max")]:
-            if thresh is not None:
-                for j, m in enumerate(mids):
-                    if m is not None and m >= thresh:
-                        ax.axvline(j - 0.5, color="red", linestyle="--", linewidth=1.5,
-                                   label=f"Threshold {label}={thresh}")
-                        break
-
-        ax.set_xticks(range(len(bins)))
-        ax.set_xticklabels([f"{m:.0f}" if m is not None else "?" for m in mids],
-                           rotation=45, ha="right", fontsize=8)
-
-        for j, n in enumerate(ns):
-            ax.text(j, means[j] + max(means) * 0.02, f"n={n}", ha="center", fontsize=7, color="gray")
-
-        ax.set_xlabel(comp_data.get("column", comp_name).replace("_", " ").title())
-        ax.set_ylabel(f"Mean {outcome_label}")
-        ax.set_title(f"{comp_name.capitalize()}: {outcome_label} by Climate Bin")
-        ax.legend(fontsize=8)
-
-    fig.tight_layout()
-    fig.savefig(os.path.join(plot_dir, "binned_cases.png"), dpi=150)
-    plt.close(fig)
-    print("  components/binned_cases.png")
-    return fig
-
-
-def plot_redundancy_heatmap(redundancy_results: dict, plot_dir: str):
-    """Heatmap of component correlation matrix."""
-    corr = redundancy_results.get("correlation_matrix", {})
-    if not corr:
-        return
-
-    names = list(corr.keys())
-    matrix = np.array([[corr[r].get(c, 0) for c in names] for r in names])
-
-    fig, ax = plt.subplots(figsize=(5, 4))
-    im = ax.imshow(matrix, cmap="RdBu_r", vmin=-1, vmax=1)
-
-    ax.set_xticks(range(len(names)))
-    ax.set_xticklabels([n.capitalize() for n in names], rotation=45, ha="right")
-    ax.set_yticks(range(len(names)))
-    ax.set_yticklabels([n.capitalize() for n in names])
-
-    for i in range(len(names)):
-        for j in range(len(names)):
-            ax.text(j, i, f"{matrix[i, j]:.2f}", ha="center", va="center",
-                    fontsize=10, color="white" if abs(matrix[i, j]) > 0.5 else "black")
-
-    fig.colorbar(im, ax=ax, label="Phi coefficient", shrink=0.8)
-    ax.set_title("Component Redundancy (Binary Correlation)")
-
-    fig.tight_layout()
-    fig.savefig(os.path.join(plot_dir, "redundancy_heatmap.png"), dpi=150)
-    plt.close(fig)
-    print("  components/redundancy_heatmap.png")
-    return fig
-
-
 def plot_leave_one_out(leave_one_out_results: dict, plot_dir: str):
     """Bar chart comparing full model vs. leave-one-out Spearman r."""
     full = leave_one_out_results.get("full_model", {})
@@ -722,7 +492,8 @@ def plot_leave_one_out(leave_one_out_results: dict, plot_dir: str):
 # Sensitivity plots (Q7) — output/plots/sensitivity/
 # ===========================================================================
 
-def plot_threshold_sweep(sensitivity_results: dict, plot_dir: str):
+def plot_threshold_sweep(sensitivity_results: dict, plot_dir: str,
+                          file_prefix: str = "sweep", subtitle: str = "Pooled Annual"):
     """Heatmap or line plot for each component's threshold sweep."""
     figs = []
     for comp_name, comp_data in sensitivity_results.items():
@@ -735,17 +506,21 @@ def plot_threshold_sweep(sensitivity_results: dict, plot_dir: str):
 
         fig = None
         if len(min_vals) > 1 and len(max_vals) > 1:
-            fig = _plot_sweep_heatmap(comp_name, comp_data, sweeps, min_vals, max_vals, plot_dir)
+            fig = _plot_sweep_heatmap(comp_name, comp_data, sweeps, min_vals, max_vals,
+                                      plot_dir, file_prefix, subtitle)
         elif len(min_vals) > 1:
-            fig = _plot_sweep_line(comp_name, comp_data, sweeps, "min_value", min_vals, plot_dir)
+            fig = _plot_sweep_line(comp_name, comp_data, sweeps, "min_value", min_vals,
+                                   plot_dir, file_prefix, subtitle)
         elif len(max_vals) > 1:
-            fig = _plot_sweep_line(comp_name, comp_data, sweeps, "max_value", max_vals, plot_dir)
+            fig = _plot_sweep_line(comp_name, comp_data, sweeps, "max_value", max_vals,
+                                   plot_dir, file_prefix, subtitle)
         if fig is not None:
             figs.append((comp_name, fig))
     return figs
 
 
-def _plot_sweep_heatmap(comp_name, comp_data, sweeps, min_vals, max_vals, plot_dir):
+def _plot_sweep_heatmap(comp_name, comp_data, sweeps, min_vals, max_vals, plot_dir,
+                        file_prefix="sweep", subtitle="Pooled Annual"):
     """2D heatmap for threshold sweep with both min and max varying."""
     matrix = np.full((len(min_vals), len(max_vals)), np.nan)
     for s in sweeps:
@@ -765,7 +540,7 @@ def _plot_sweep_heatmap(comp_name, comp_data, sweeps, min_vals, max_vals, plot_d
     ax.set_yticklabels([str(v) for v in min_vals])
     ax.set_xlabel("Max threshold")
     ax.set_ylabel("Min threshold")
-    ax.set_title(f"Q7: {comp_name.capitalize()} Threshold Sensitivity")
+    ax.set_title(f"{subtitle}: {comp_name.capitalize()} Threshold Sensitivity")
 
     for i in range(len(min_vals)):
         for j in range(len(max_vals)):
@@ -783,13 +558,15 @@ def _plot_sweep_heatmap(comp_name, comp_data, sweeps, min_vals, max_vals, plot_d
 
     fig.colorbar(im, ax=ax, label="Spearman r", shrink=0.8)
     fig.tight_layout()
-    fig.savefig(os.path.join(plot_dir, f"sweep_{comp_name}.png"), dpi=150)
+    fname = f"{file_prefix}_{comp_name}.png"
+    fig.savefig(os.path.join(plot_dir, fname), dpi=150)
     plt.close(fig)
-    print(f"  sensitivity/sweep_{comp_name}.png")
+    print(f"  sensitivity/{fname}")
     return fig
 
 
-def _plot_sweep_line(comp_name, comp_data, sweeps, vary_key, vals, plot_dir):
+def _plot_sweep_line(comp_name, comp_data, sweeps, vary_key, vals, plot_dir,
+                     file_prefix="sweep", subtitle="Pooled Annual"):
     """1D line plot for threshold sweep with only one dimension varying."""
     rs = []
     for v in vals:
@@ -813,15 +590,16 @@ def _plot_sweep_line(comp_name, comp_data, sweeps, vary_key, vals, plot_dir):
             ax.annotate(f"{r:.3f}", xy=(v, r), xytext=(0, 10),
                         textcoords="offset points", ha="center", fontsize=8)
 
-    label = "Min threshold" if "min" in vary_key else "Max threshold"
-    ax.set_xlabel(label)
+    threshold_label = "Min threshold" if "min" in vary_key else "Max threshold"
+    ax.set_xlabel(threshold_label)
     ax.set_ylabel("Spearman r")
-    ax.set_title(f"Q7: {comp_name.capitalize()} Threshold Sensitivity")
+    ax.set_title(f"{subtitle}: {comp_name.capitalize()} Threshold Sensitivity")
 
     fig.tight_layout()
-    fig.savefig(os.path.join(plot_dir, f"sweep_{comp_name}.png"), dpi=150)
+    fname = f"{file_prefix}_{comp_name}.png"
+    fig.savefig(os.path.join(plot_dir, fname), dpi=150)
     plt.close(fig)
-    print(f"  sensitivity/sweep_{comp_name}.png")
+    print(f"  sensitivity/{fname}")
     return fig
 
 
@@ -840,7 +618,6 @@ def plot_score_distribution(discrimination_results: dict, plot_dir: str,
 
     scores = [d["score"] for d in dist]
     pcts = [d.get("pct", 0) or 0 for d in dist]
-    mean_cases = [d.get("mean_cases", 0) or 0 for d in dist]
 
     fig, ax = plt.subplots(figsize=(6, 5))
 
@@ -862,32 +639,6 @@ def plot_score_distribution(discrimination_results: dict, plot_dir: str,
     fig.savefig(os.path.join(plot_dir, "score_distribution.png"), dpi=150)
     plt.close(fig)
     print("  discrimination/score_distribution.png")
-    return fig
-
-
-def plot_location_max_score(discrimination_results: dict, plot_dir: str):
-    """Bar chart of per-location % at max score."""
-    per_loc = discrimination_results.get("per_location", [])
-    if not per_loc:
-        return
-
-    locations = [d["location"] for d in per_loc]
-    pcts = [d.get("pct_at_max", 0) or 0 for d in per_loc]
-
-    fig, ax = plt.subplots(figsize=(max(6, len(locations) * 0.6), 5))
-    colors = ["#d9534f" if p == 100 else "#f0ad4e" if p >= 80 else "#337ab7" for p in pcts]
-    ax.bar(range(len(locations)), pcts, color=colors, alpha=0.8)
-
-    ax.set_ylabel("% of Months at Max Score")
-    ax.set_title("Q8: Signal Ceiling by Location")
-    ax.set_xticks(range(len(locations)))
-    ax.set_xticklabels(locations, rotation=45, ha="right", fontsize=9)
-    ax.axhline(100, color="red", linestyle="--", linewidth=1, alpha=0.5)
-
-    fig.tight_layout()
-    fig.savefig(os.path.join(plot_dir, "location_max_score.png"), dpi=150)
-    plt.close(fig)
-    print("  discrimination/location_max_score.png")
     return fig
 
 
@@ -955,6 +706,8 @@ def generate_pdf(all_results: dict, model, df, out_file: str):
     temporal_results = all_results.get("temporal_results")
     leave_one_out_results = all_results.get("leave_one_out_results")
     sensitivity_results = all_results.get("sensitivity_results")
+    within_region_sensitivity = all_results.get("within_region_sensitivity")
+    between_region_sensitivity = all_results.get("between_region_sensitivity")
     discrimination_results = all_results.get("discrimination_results")
 
     outcome_col = results.get("outcome_metric", "disease_cases")
@@ -979,8 +732,8 @@ def generate_pdf(all_results: dict, model, df, out_file: str):
                 _add(plot_location_correlations(results, tmpdir))
                 _add(plot_score_heatmap(df, composite, tmpdir, model))
 
-            if temporal_results and annual_results:
-                _add(plot_within_location_temporal(temporal_results, annual_results, tmpdir, outcome_label))
+            if temporal_results:
+                _add(plot_within_location_temporal(temporal_results, tmpdir, outcome_label))
 
             if annual_results:
                 _add(plot_score_vs_cases_by_location(annual_results, tmpdir, outcome_label))
@@ -994,6 +747,20 @@ def generate_pdf(all_results: dict, model, df, out_file: str):
 
             if sensitivity_results:
                 for _comp_name, fig in (plot_threshold_sweep(sensitivity_results, tmpdir) or []):
+                    _add(fig)
+
+            if within_region_sensitivity:
+                for _comp_name, fig in (plot_threshold_sweep(
+                    within_region_sensitivity, tmpdir,
+                    file_prefix="sweep_within", subtitle="Within-Region Temporal",
+                ) or []):
+                    _add(fig)
+
+            if between_region_sensitivity:
+                for _comp_name, fig in (plot_threshold_sweep(
+                    between_region_sensitivity, tmpdir,
+                    file_prefix="sweep_between", subtitle="Between-Region Spatial",
+                ) or []):
                     _add(fig)
 
             if discrimination_results:
@@ -1060,9 +827,9 @@ def main(base_analysis_dir: str = BASE_ANALYSIS_DIR,
 
     # --- Q2: Temporal plots ---
     temporal_results = load_json(os.path.join(base_analysis_dir, "temporal", "within_region.json"))
-    if temporal_results and annual_results:
+    if temporal_results:
         print("\nTemporal (Q2):")
-        plot_within_location_temporal(temporal_results, annual_results, plot_dirs["temporal"], outcome_label)
+        plot_within_location_temporal(temporal_results, plot_dirs["temporal"], outcome_label)
 
     # --- Q3: Spatial plots ---
     if annual_results:
@@ -1084,9 +851,17 @@ def main(base_analysis_dir: str = BASE_ANALYSIS_DIR,
 
     # --- Q7: Sensitivity plots ---
     sensitivity_results = load_json(os.path.join(base_analysis_dir, "sensitivity", "threshold_sweep.json"))
+    within_region_sensitivity = load_json(os.path.join(base_analysis_dir, "sensitivity", "threshold_sweep_within.json"))
+    between_region_sensitivity = load_json(os.path.join(base_analysis_dir, "sensitivity", "threshold_sweep_between.json"))
     if sensitivity_results:
         print("\nSensitivity (Q7):")
         plot_threshold_sweep(sensitivity_results, plot_dirs["sensitivity"])
+    if within_region_sensitivity:
+        plot_threshold_sweep(within_region_sensitivity, plot_dirs["sensitivity"],
+                             file_prefix="sweep_within", subtitle="Within-Region Temporal")
+    if between_region_sensitivity:
+        plot_threshold_sweep(between_region_sensitivity, plot_dirs["sensitivity"],
+                             file_prefix="sweep_between", subtitle="Between-Region Spatial")
 
     # --- Q8: Discrimination plots ---
     discrimination_results = load_json(os.path.join(base_analysis_dir, "discrimination", "score_distribution.json"))

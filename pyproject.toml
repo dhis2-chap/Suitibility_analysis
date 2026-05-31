@@ -10,3 +10,7 @@ dependencies = [
     "joblib",
     "matplotlib",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

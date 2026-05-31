@@ -1,11 +1,9 @@
-"""Q7: Threshold sensitivity analysis using the annual rolling approach.
+"""Threshold sensitivity analysis using the annual rolling approach.
 
-For each component, sweeps threshold values and tracks the Spearman r between
-months_suitable (at that threshold) and total annual cases in the same 12-month
-window. This is consistent with the primary analysis method.
-
-Answers: how sensitive is the annual correlation to the specific threshold choices?
-Are the Uganda DHIS2 thresholds empirically optimal for predicting annual burden?
+For each component, sweeps threshold values and tracks Spearman r for three metrics:
+  - Pooled: months_suitable vs total_cases pooled across all (location, window) pairs.
+  - Within-region: mean within-location temporal r (same logic as analyze_within_region).
+  - Between-region: spatial r across locations between mean months_suitable and mean total_cases.
 """
 
 import pandas as pd
@@ -25,16 +23,56 @@ def sweep_thresholds(
     time_col: str = "time_period",
     window: int = 12,
 ) -> dict:
-    """Sweep each component's thresholds and track annual Spearman r.
+    """Sweep thresholds, tracking pooled Spearman r (months_suitable vs total_cases)."""
+    return _run_sweep(df, model, _pooled_r, cases_col, location_col, time_col, window)
 
-    For each threshold combination, computes the rolling window data using the
-    modified model, then correlates months_suitable vs total_cases. This ensures
-    threshold selection is evaluated against the same metric as the primary analysis.
 
-    Sweep ranges are derived from the actual column data distribution (percentiles),
-    so they are automatically unit-correct regardless of whether the data uses
-    mm/month, mm/day, or other scales.
+def sweep_thresholds_within_region(
+    df: pd.DataFrame,
+    model: SuitabilityModel,
+    cases_col: str = "disease_cases",
+    location_col: str = "location",
+    time_col: str = "time_period",
+    window: int = 12,
+) -> dict:
+    """Sweep thresholds, tracking mean within-location temporal Spearman r.
+
+    For each threshold combination, computes the Spearman r between months_suitable
+    and total_cases within each location across time, then averages across locations.
+    Answers: does changing this threshold strengthen or weaken the year-to-year
+    correlation within individual districts?
     """
+    return _run_sweep(df, model, _mean_within_location_r, cases_col, location_col, time_col, window)
+
+
+def sweep_thresholds_between_region(
+    df: pd.DataFrame,
+    model: SuitabilityModel,
+    cases_col: str = "disease_cases",
+    location_col: str = "location",
+    time_col: str = "time_period",
+    window: int = 12,
+) -> dict:
+    """Sweep thresholds, tracking between-location spatial Spearman r.
+
+    For each threshold combination, computes the Spearman r across locations between
+    each location's mean months_suitable and mean total_cases.
+    Answers: does changing this threshold strengthen or weaken the spatial pattern
+    where districts with more suitable months also have more disease burden?
+    """
+    return _run_sweep(df, model, _between_location_r, cases_col, location_col, time_col, window)
+
+
+def _run_sweep(
+    df: pd.DataFrame,
+    model: SuitabilityModel,
+    metric_fn,
+    cases_col: str,
+    location_col: str,
+    time_col: str,
+    window: int,
+) -> dict:
+    """Generic sweep runner. Calls metric_fn(win_df) for each threshold combination."""
     sweep_config = _default_sweep_config(model, df)
     results = {}
 
@@ -44,59 +82,57 @@ def sweep_thresholds(
 
         config = sweep_config[comp.name]
         comp_results = {
-            "component": comp.name,
-            "column": comp.column,
             "original_min": comp.min_value,
             "original_max": comp.max_value,
             "sweeps": [],
         }
 
-        min_values = config.get("min_values", [comp.min_value])
-        max_values = config.get("max_values", [comp.max_value])
-
-        for min_val in min_values:
-            for max_val in max_values:
+        for min_val in config.get("min_values", [comp.min_value]):
+            for max_val in config.get("max_values", [comp.max_value]):
                 modified_model = _modify_component(model, comp.name, min_val, max_val)
                 win_df = compute_window_data(
                     df, modified_model, cases_col, location_col, time_col, window
                 )
-
-                if len(win_df) >= 3 and win_df["months_suitable"].nunique() > 1:
-                    r, p = stats.spearmanr(win_df["months_suitable"], win_df["total_cases"])
-                    sweep_result = {
-                        "min_value": min_val,
-                        "max_value": max_val,
-                        "spearman_r": _safe(r),
-                        "spearman_p": _safe(p),
-                        "n_windows": len(win_df),
-                    }
-                else:
-                    sweep_result = {
-                        "min_value": min_val,
-                        "max_value": max_val,
-                        "spearman_r": None,
-                        "spearman_p": None,
-                        "n_windows": len(win_df) if not win_df.empty else 0,
-                    }
-
-                comp_results["sweeps"].append(sweep_result)
-
-        # Find best threshold combination (highest positive r)
-        valid = [s for s in comp_results["sweeps"] if s["spearman_r"] is not None]
-        if valid:
-            best = max(valid, key=lambda s: s["spearman_r"])
-            comp_results["best_min"] = best["min_value"]
-            comp_results["best_max"] = best["max_value"]
-            comp_results["best_r"] = best["spearman_r"]
-            comp_results["original_r"] = next(
-                (s["spearman_r"] for s in valid
-                 if s["min_value"] == comp.min_value and s["max_value"] == comp.max_value),
-                None,
-            )
+                comp_results["sweeps"].append({
+                    "min_value": min_val,
+                    "max_value": max_val,
+                    "spearman_r": metric_fn(win_df),
+                })
 
         results[comp.name] = comp_results
 
     return results
+
+
+def _pooled_r(win_df: pd.DataFrame) -> float | None:
+    """Spearman r between months_suitable and total_cases pooled across all windows."""
+    if len(win_df) >= 3 and win_df["months_suitable"].nunique() > 1:
+        r, _ = stats.spearmanr(win_df["months_suitable"], win_df["total_cases"])
+        return _safe(r)
+    return None
+
+
+def _mean_within_location_r(win_df: pd.DataFrame) -> float | None:
+    """Mean Spearman r across locations of within-location temporal correlation."""
+    all_rs = []
+    for _, group in win_df.groupby("location"):
+        if len(group) >= 3 and group["months_suitable"].nunique() > 1:
+            r, _ = stats.spearmanr(group["months_suitable"], group["total_cases"])
+            if r is not None and not np.isnan(r):
+                all_rs.append(float(r))
+    return _safe(np.mean(all_rs)) if all_rs else None
+
+
+def _between_location_r(win_df: pd.DataFrame) -> float | None:
+    """Spearman r across locations between mean months_suitable and mean total_cases."""
+    per_loc = win_df.groupby("location").agg(
+        mean_months=("months_suitable", "mean"),
+        mean_cases=("total_cases", "mean"),
+    ).reset_index()
+    if len(per_loc) < 3 or per_loc["mean_months"].nunique() <= 1:
+        return None
+    r, _ = stats.spearmanr(per_loc["mean_months"], per_loc["mean_cases"])
+    return _safe(r)
 
 
 def _default_sweep_config(model: SuitabilityModel, df: pd.DataFrame) -> dict:

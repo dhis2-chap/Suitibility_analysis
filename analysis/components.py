@@ -1,114 +1,11 @@
-"""Q5: Per-component deep analysis.
+"""Q5: Leave-one-out component contribution analysis."""
 
-- Bin each continuous variable into ranges, compute mean cases per bin
-  (detect nonlinearity in the climate-cases relationship).
-- Component redundancy: correlation matrix between binary component scores.
-- Leave-one-out: compare composite with/without each component.
-"""
-
-import pandas as pd
 import numpy as np
+import pandas as pd
 from scipy import stats
 
 from suitability.model import SuitabilityModel
 from analysis.annual import compute_window_data
-
-
-def analyze_binned_response(
-    df: pd.DataFrame,
-    model: SuitabilityModel,
-    cases_col: str = "disease_cases",
-    n_bins: int = 10,
-) -> dict:
-    """Bin each continuous climate variable and compute mean cases per bin.
-
-    Helps detect nonlinearity: if the threshold captures a real breakpoint,
-    mean cases should jump near the threshold value.
-    """
-    results = {}
-
-    for comp in model.components:
-        col = comp.column
-        if col not in df.columns:
-            continue
-
-        values = df[col].dropna()
-        cases = df.loc[values.index, cases_col]
-
-        # NORMATIVE DECISION (ND-E): Bins are quantile-based (qcut), not equal-width (cut).
-        # qcut ensures roughly equal sample sizes per bin, which stabilises estimates
-        # in sparse regions of the climate variable's range. Trade-off: bin edges do
-        # not align with the threshold boundaries defined in the model, making it
-        # harder to visually confirm whether the threshold captures a breakpoint.
-        # Alternative: equal-width bins (pd.cut) would align better with thresholds
-        # but would produce empty or near-empty bins where data is sparse.
-        # Falls back to equal-width if qcut fails (e.g., too many duplicate values).
-        try:
-            bins = pd.qcut(values, q=n_bins, duplicates="drop")
-        except ValueError:
-            bins = pd.cut(values, bins=n_bins, duplicates="drop")
-
-        bin_stats = []
-        for bin_label, group_idx in bins.groupby(bins, observed=False).groups.items():
-            bin_cases = cases.loc[group_idx]
-            bin_values = values.loc[group_idx]
-            bin_stats.append({
-                "bin": str(bin_label),
-                "bin_mid": _safe(bin_values.mean()),
-                "n": len(bin_cases),
-                "mean_cases": _safe(bin_cases.mean()),
-                "median_cases": _safe(bin_cases.median()),
-                "std_cases": _safe(bin_cases.std()),
-            })
-
-        # Sort by bin midpoint
-        bin_stats.sort(key=lambda x: x["bin_mid"] if x["bin_mid"] is not None else 0)
-
-        results[comp.name] = {
-            "column": col,
-            "threshold_min": comp.min_value,
-            "threshold_max": comp.max_value,
-            "bins": bin_stats,
-        }
-
-    return results
-
-
-def analyze_redundancy(
-    df: pd.DataFrame,
-    model: SuitabilityModel,
-) -> dict:
-    """Correlation matrix between binary component scores.
-
-    High correlation means components are redundant — they fire together.
-    """
-    component_scores = model.compute_component_scores(df)
-    names = list(component_scores.columns)
-
-    # Phi coefficient (Pearson on binary variables)
-    corr_matrix = component_scores.corr().to_dict()
-
-    # Percent agreement (both met or both not met)
-    agreement = {}
-    for i, name_i in enumerate(names):
-        for j, name_j in enumerate(names):
-            if i < j:
-                agree = (component_scores[name_i] == component_scores[name_j]).mean()
-                agreement[f"{name_i}_vs_{name_j}"] = _safe(agree)
-
-    # Joint frequency: how often each pair is both met
-    joint_met = {}
-    for i, name_i in enumerate(names):
-        for j, name_j in enumerate(names):
-            if i < j:
-                both = ((component_scores[name_i] == 1) & (component_scores[name_j] == 1)).mean()
-                joint_met[f"{name_i}_and_{name_j}"] = _safe(both)
-
-    return {
-        "correlation_matrix": corr_matrix,
-        "pct_agreement": agreement,
-        "joint_met_frequency": joint_met,
-    }
 
 
 def analyze_leave_one_out(

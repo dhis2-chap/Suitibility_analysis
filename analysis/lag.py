@@ -15,7 +15,7 @@ import pandas as pd
 from scipy import stats
 
 from suitability.model import SuitabilityModel
-from analysis.correlation import CorrelationAnalysis, _safe_float
+from analysis.correlation import CorrelationAnalysis
 
 
 def create_lagged_df(
@@ -87,15 +87,11 @@ def run_lag_sweep(
     """Run correlation analysis at each lag from 0 to max_lag months.
 
     Returns a dict with:
-      - "by_lag": {0: {...}, 1: {...}, ...} — full CorrelationAnalysis results per lag
       - "summary": list of {lag, n, spearman_r, spearman_p, pearson_r, ...}
       - "best_lag": the lag with highest signed Spearman r (see ND-B comment below)
-      - "component_by_lag": {component_name: [{lag, point_biserial_r, ...}, ...]}
       - "continuous_by_lag": {column_name: [{lag, spearman_r, ...}, ...]}
     """
-    by_lag = {}
     summary = []
-    component_by_lag = {c.name: [] for c in model.components}
     continuous_by_lag = {c.column: [] for c in model.components}
 
     for lag in range(max_lag + 1):
@@ -105,14 +101,11 @@ def run_lag_sweep(
             continue
 
         analysis = CorrelationAnalysis(model)
-        results = analysis.run(
-            lagged_df, cases_col, population_col, location_col, time_col
-        )
-        by_lag[lag] = results
+        results = analysis.run(lagged_df, cases_col)
 
         # Extract summary row
         overall = results.get("overall_correlation", {})
-        row = {
+        summary.append({
             "lag": lag,
             "n": results.get("n_observations", 0),
             "spearman_r": overall.get("spearman_r"),
@@ -120,27 +113,7 @@ def run_lag_sweep(
             "pearson_r": overall.get("pearson_r"),
             "pearson_p": overall.get("pearson_p"),
             "r_squared": overall.get("r_squared"),
-        }
-
-        # Incidence correlation if available
-        inc = results.get("incidence_analysis", {}).get("composite_correlation", {})
-        if inc:
-            row["incidence_spearman_r"] = inc.get("spearman_r")
-            row["incidence_spearman_p"] = inc.get("spearman_p")
-
-        summary.append(row)
-
-        # Per-component tracking
-        comp_analysis = results.get("component_analysis", {})
-        for comp_name, comp_stats in comp_analysis.items():
-            component_by_lag[comp_name].append({
-                "lag": lag,
-                "point_biserial_r": comp_stats.get("point_biserial_r"),
-                "point_biserial_p": comp_stats.get("point_biserial_p"),
-                "mann_whitney_p": comp_stats.get("mann_whitney_p"),
-                "mean_cases_met": comp_stats.get("mean_cases_met"),
-                "mean_cases_not_met": comp_stats.get("mean_cases_not_met"),
-            })
+        })
 
         # Per-continuous-variable tracking
         cont_analysis = results.get("continuous_variables", {})
@@ -163,9 +136,7 @@ def run_lag_sweep(
     best_lag = max(valid, key=lambda s: s["spearman_r"])["lag"] if valid else 0
 
     return {
-        "by_lag": by_lag,
         "summary": summary,
         "best_lag": best_lag,
-        "component_by_lag": component_by_lag,
         "continuous_by_lag": continuous_by_lag,
     }

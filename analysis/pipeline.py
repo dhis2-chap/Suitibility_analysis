@@ -5,16 +5,15 @@ import sys
 import pandas as pd
 
 from analysis.correlation import CorrelationAnalysis
-from analysis.stratified import analyze_by_location, analyze_by_month
+from analysis.stratified import analyze_by_location
 from analysis.lag import run_lag_sweep
 from analysis.temporal import analyze_within_region
-from analysis.spatial import analyze_cross_sectional
-from analysis.components import (
-    analyze_binned_response,
-    analyze_redundancy,
-    analyze_leave_one_out,
+from analysis.components import analyze_leave_one_out
+from analysis.sensitivity import (
+    sweep_thresholds,
+    sweep_thresholds_within_region,
+    sweep_thresholds_between_region,
 )
-from analysis.sensitivity import sweep_thresholds
 from analysis.discrimination import analyze_discrimination
 from analysis.annual import analyze_months_suitable
 
@@ -83,8 +82,8 @@ def run_all_analyses(df: pd.DataFrame, model, outcome_col: str) -> dict:
     No file I/O — pure computation.
 
     Returns dict with keys: results, annual_results, temporal_results,
-    spatial_results, lag_results, binned_results, redundancy_results,
-    leave_one_out_results, sensitivity_results, discrimination_results.
+    lag_results, leave_one_out_results, sensitivity_results,
+    within_region_sensitivity, between_region_sensitivity, discrimination_results.
     """
     annual_results = None
     if "time_period" in df.columns and "location" in df.columns:
@@ -94,17 +93,12 @@ def run_all_analyses(df: pd.DataFrame, model, outcome_col: str) -> dict:
     results = analysis.run(df, cases_col=outcome_col)
     results["outcome_metric"] = outcome_col
 
-    by_location = None
-    by_month = None
     if "location" in df.columns and "time_period" in df.columns:
         by_location = analyze_by_location(
             df, model, cases_col=outcome_col,
             location_col="location", time_col="time_period",
         )
         results["by_location"] = by_location
-    if "time_period" in df.columns:
-        by_month = analyze_by_month(df, model, cases_col=outcome_col)
-        results["by_month"] = by_month
 
     temporal_results = None
     if "time_period" in df.columns and "location" in df.columns:
@@ -113,22 +107,15 @@ def run_all_analyses(df: pd.DataFrame, model, outcome_col: str) -> dict:
             location_col="location", time_col="time_period",
         )
 
-    spatial_results = None
-    if "time_period" in df.columns and "location" in df.columns:
-        spatial_results = analyze_cross_sectional(df, model, cases_col=outcome_col)
-
     lag_results = None
     if "time_period" in df.columns and "location" in df.columns:
         lag_results = run_lag_sweep(df, model, max_lag=3, cases_col=outcome_col)
         results["lag_analysis"] = {
             "summary": lag_results["summary"],
             "best_lag": lag_results["best_lag"],
-            "component_by_lag": lag_results["component_by_lag"],
             "continuous_by_lag": lag_results["continuous_by_lag"],
         }
 
-    binned_results = analyze_binned_response(df, model, cases_col=outcome_col)
-    redundancy_results = analyze_redundancy(df, model)
     leave_one_out_results = analyze_leave_one_out(
         df, model, cases_col=outcome_col,
         location_col="location", time_col="time_period",
@@ -139,17 +126,26 @@ def run_all_analyses(df: pd.DataFrame, model, outcome_col: str) -> dict:
         location_col="location", time_col="time_period",
     )
 
+    within_region_sensitivity = sweep_thresholds_within_region(
+        df, model, cases_col=outcome_col,
+        location_col="location", time_col="time_period",
+    )
+
+    between_region_sensitivity = sweep_thresholds_between_region(
+        df, model, cases_col=outcome_col,
+        location_col="location", time_col="time_period",
+    )
+
     discrimination_results = analyze_discrimination(df, model, cases_col=outcome_col)
 
     return {
         "results": results,
         "annual_results": annual_results,
         "temporal_results": temporal_results,
-        "spatial_results": spatial_results,
         "lag_results": lag_results,
-        "binned_results": binned_results,
-        "redundancy_results": redundancy_results,
         "leave_one_out_results": leave_one_out_results,
         "sensitivity_results": sensitivity_results,
+        "within_region_sensitivity": within_region_sensitivity,
+        "between_region_sensitivity": between_region_sensitivity,
         "discrimination_results": discrimination_results,
     }

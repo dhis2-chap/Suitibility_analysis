@@ -27,7 +27,6 @@ period. See docstring of analyze_months_suitable() for discussion.
 
 import pandas as pd
 import numpy as np
-from scipy import stats
 
 from suitability.model import SuitabilityModel
 
@@ -43,10 +42,11 @@ def compute_window_data(
     """Shared helper: compute rolling window pairs for any model.
 
     For each location, builds trailing calendar windows of `window` months.
-    Each window yields one row: (months_suitable, fraction_suitable, total_cases).
+    Each window yields one row: (months_suitable, total_cases).
 
-    NaN rows in cases_col are excluded from window counts. Windows with ≤3 valid
-    months are dropped. To treat missing cases as zero, fill NaN before calling.
+    NaN rows in cases_col are excluded from window counts. Windows with fewer
+    than 9 valid months are dropped, ensuring windows represent a near-complete
+    year. To treat missing cases as zero, fill NaN before calling.
 
     Args:
         df: Input DataFrame with location, time, climate, and cases columns.
@@ -57,7 +57,7 @@ def compute_window_data(
 
     Returns:
         DataFrame with columns: location, time_period, months_suitable,
-        fraction_suitable, total_cases. Empty if no qualifying windows exist.
+        total_cases. Empty if no qualifying windows exist.
     """
     composite = model.compute_composite_score(df)
     max_score = len(model.components)
@@ -88,21 +88,20 @@ def compute_window_data(
             lo = int(np.searchsorted(valid_dates, np.datetime64(window_start), side="left"))
             hi = int(np.searchsorted(valid_dates, np.datetime64(t), side="right"))
             n_valid = hi - lo
-            if n_valid <= 3:
+            if n_valid < 9:
                 continue
             months_suitable = float(cum_suitable[hi] - cum_suitable[lo])
             rows.append({
                 "location": str(location),
                 "time_period": str(getattr(row, time_col)),
                 "months_suitable": months_suitable,
-                "fraction_suitable": months_suitable / n_valid,
                 "total_cases": float(cum_cases[hi] - cum_cases[lo]),
             })
 
     if rows:
         return pd.DataFrame(rows)
     return pd.DataFrame(
-        columns=["location", "time_period", "months_suitable", "fraction_suitable", "total_cases"]
+        columns=["location", "time_period", "months_suitable", "total_cases"]
     )
 
 
@@ -125,8 +124,7 @@ def analyze_months_suitable(
     window of data. This pools across both locations and time.
 
     Returns a dict with:
-      - window_data: list of {location, time_period, months_suitable,
-                              fraction_suitable, total_cases}
+      - window_data: list of {location, time_period, months_suitable, total_cases}
       - correlation: pooled Spearman r across all windows
       - per_location: per-location mean months_suitable and mean total_cases
       - cross_sectional: for each window-end time period, Spearman r across locations
@@ -141,44 +139,16 @@ def analyze_months_suitable(
         results["window_data"] = win_df.to_dict("records")
         return results
 
-    results["n_observations"] = len(win_df)
     results["window_data"] = win_df.to_dict("records")
-
-    # Pooled correlation across all location-windows
-    r, p = stats.spearmanr(win_df["months_suitable"], win_df["total_cases"])
-    results["correlation"] = {
-        "spearman_r": _safe(r),
-        "spearman_p": _safe(p),
-        "n": len(win_df),
-        "description": (
-            f"Months at max suitability score (0–{window}) vs. "
-            f"total cases in same {window}-month window"
-        ),
-    }
 
     # Per-location summary
     per_loc = {}
     for location, group in win_df.groupby("location"):
         per_loc[str(location)] = {
-            "n_windows": len(group),
             "mean_months_suitable": _safe(group["months_suitable"].mean()),
-            "mean_fraction_suitable": _safe(group["fraction_suitable"].mean()),
             "mean_total_cases": _safe(group["total_cases"].mean()),
         }
     results["per_location"] = per_loc
-
-    # Cross-sectional: for each window-end time period, correlate across locations
-    cross = []
-    for tp, group in win_df.groupby("time_period"):
-        if len(group) >= 3 and group["months_suitable"].nunique() > 1:
-            r, p = stats.spearmanr(group["months_suitable"], group["total_cases"])
-            cross.append({
-                "time_period": tp,
-                "spearman_r": _safe(r),
-                "spearman_p": _safe(p),
-                "n_locations": len(group),
-            })
-    results["cross_sectional"] = cross
 
     return results
 
